@@ -1,0 +1,14 @@
+D:\Saxion\Networking\A2_chatbox\starting_code\server\bin\Release\net8.0\server.exe
+D:\Saxion\Networking\A2_chatbox\starting_code\server\bin\Release\net8.0\server.deps.json
+D:\Saxion\Networking\A2_chatbox\starting_code\server\bin\Release\net8.0\server.runtimeconfig.json
+D:\Saxion\Networking\A2_chatbox\starting_code\server\bin\Release\net8.0\server.dll
+D:\Saxion\Networking\A2_chatbox\starting_code\server\bin\Release\net8.0\server.pdb
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Release\net8.0\server.GeneratedMSBuildEditorConfig.editorconfig
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Release\net8.0\server.AssemblyInfoInputs.cache
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Release\net8.0\server.AssemblyInfo.cs
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Release\net8.0\server.csproj.CoreCompileInputs.cache
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Release\net8.0\server.dll
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Release\net8.0\refint\server.dll
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Release\net8.0\server.pdb
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Release\net8.0\server.genruntimeconfig.cache
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Release\net8.0\ref\server.dll
