@@ -12,55 +12,150 @@ class TCPServerSample
 	 * This class implements a simple concurrent TCP Echo server.
 	 * Read carefully through the comments below.
 	 */
-	public static void Main (string[] args)
+	class ClientInfos
+    {
+        public TcpClient Client { get; set; }
+        public string Nickname { get; set; }
+        public NetworkStream Stream => Client.GetStream();
+    }
+
+	private static List<ClientInfos> _clients = new List<ClientInfos>();
+	private static int _guestNumber = 0;
+
+    public static void Main (string[] args)
 	{
 		Console.WriteLine("Server started on port 55555");
 
 		TcpListener listener = new TcpListener (IPAddress.Any, 55555);
 		listener.Start ();
 
-		List<TcpClient> clients = new List<TcpClient>();
-
 		while (true)
 		{
-			//First big change with respect to example 001
-			//We no longer block waiting for a client to connect, but we only block if we know
-			//a client is actually waiting (in other words, we will not block)
-			//In order to serve multiple clients, we add that client to a list
-			while (listener.Pending()) { 
-				clients.Add(listener.AcceptTcpClient());
-				Console.WriteLine("Accepted new client.");
-			}
+            ProcessNewClients(listener);
+            ProcessExistingClients();
+            CleanupFaultyClients();
 
-			//Second big change, instead of blocking on one client, 
-			//we now process all clients IF they have data available
-			foreach (TcpClient client in clients)
-			{
-				if (client.Available == 0) continue;
-				NetworkStream stream = client.GetStream();
-                byte[] inBytes = StreamUtil.Read(client.GetStream());
-                string inString = Encoding.UTF8.GetString(inBytes);
-
-                //reverse the string
-                string outString = strrev(inString);
-
-                //add timestamp
-                outString = DateTime.Now.ToString("HH:mm:ss") + " " + outString;
-
-                //add ip address & port
-                outString = ((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString() + ":" + ((IPEndPoint)client.Client.RemoteEndPoint).Port + " " + outString;
-
-                byte[] outBytes = Encoding.UTF8.GetBytes(outString);
-                StreamUtil.Write(stream, outBytes); 
-			}
-
-			//Although technically not required, now that we are no longer blocking, 
-			//it is good to cut your CPU some slack
-			Thread.Sleep(100);
+            //Although technically not required, now that we are no longer blocking, 
+            //it is good to cut your CPU some slack
+            Thread.Sleep(100);
 		}
 	}
 
-	public static string strrev(string str)
+    private static void ProcessNewClients(TcpListener listener)
+    {
+        while (listener.Pending())
+        {
+            TcpClient client = listener.AcceptTcpClient();
+            ClientInfos clientInfo = new ClientInfos();
+            clientInfo.Client = client;
+            clientInfo.Nickname = $"Guest{_guestNumber++}";
+            _clients.Add(clientInfo);
+
+            SendToClient(clientInfo, $"You joined as {clientInfo.Nickname}!");
+            Broadcast($"{clientInfo.Nickname} joined the chat", exclude: clientInfo);
+        }
+    }
+    private static void ProcessExistingClients()
+    {
+        List<ClientInfos> faultyClients = new List<ClientInfos>();
+
+
+        foreach (ClientInfos client in _clients)
+        {
+            NetworkStream stream = client.Stream;
+            if (stream.DataAvailable)
+            {
+                try
+                {
+                    byte[] inBytes = StreamUtil.Read(stream);
+                    string inString = Encoding.UTF8.GetString(inBytes);
+                    string formatted = $"[{DateTime.Now:HH:mm:ss} - {client.Client.Client.RemoteEndPoint}] {client.Nickname}: {strrev(inString)}";
+
+
+                    Broadcast(formatted);
+                }
+                catch(Exception e)
+                {
+                    Console.WriteLine($"Error > {e.Message}");
+                    faultyClients.Add(client);
+                }
+            }
+        }
+    }
+
+    private static void CleanupFaultyClients()
+    {
+        List<ClientInfos> faultyClients = new List<ClientInfos>();
+        foreach (ClientInfos client in _clients)
+        {
+            if (!IsClientConnected(client.Client))
+            {
+                faultyClients.Add(client);
+                Broadcast($"{client.Nickname} left the chat");
+            }
+        }
+
+        foreach (ClientInfos client in faultyClients)
+        {
+            client.Client.Close();
+        }
+
+        _clients.RemoveAll(c => faultyClients.Contains(c));
+    }
+
+    private static bool IsClientConnected(TcpClient client)
+    {
+        try
+        {
+            if (client.Client.Poll(0, SelectMode.SelectRead))
+            {
+                byte[] buff = new byte[1];
+                if (client.Client.Receive(buff, SocketFlags.Peek) == 0)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void Broadcast(string message, ClientInfos exclude = null)
+    {
+        byte[] outBytes = Encoding.UTF8.GetBytes(message);
+        foreach (ClientInfos client in _clients)
+        {
+            if (client != exclude)
+            {
+                try
+                {
+                    StreamUtil.Write(client.Stream, outBytes);
+                }
+                catch
+                {
+                    
+                }
+            }
+        }
+    }
+
+    private static void SendToClient(ClientInfos client, string message)
+    {
+        byte[] outBytes = Encoding.UTF8.GetBytes(message);
+        try
+        {
+            StreamUtil.Write(client.Stream, outBytes);
+        }
+        catch
+        {
+
+        }
+    }
+
+    public static string strrev(string str)
     {
 		if (str == null) return null;
 
