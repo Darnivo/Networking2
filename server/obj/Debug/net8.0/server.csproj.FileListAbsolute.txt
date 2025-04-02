@@ -26,3 +26,4 @@ D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Debug\net8.0\refint\ser
 D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Debug\net8.0\server.pdb
 D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Debug\net8.0\server.genruntimeconfig.cache
 D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Debug\net8.0\ref\server.dll
+D:\Saxion\Networking\A2_chatbox\starting_code\server\obj\Debug\net8.0\server.sourcelink.json

@@ -16,10 +16,11 @@ class TCPServerSample
     {
         public TcpClient Client { get; set; }
         public string Nickname { get; set; }
+        public string CurrentRoom { get; set; } = "general"; // default room
         public NetworkStream Stream => Client.GetStream();
     }
 
-	private static List<ClientInfos> _clients = new List<ClientInfos>();
+	private static Dictionary<string, ClientInfos> _clients = new Dictionary<string, ClientInfos>();
 	private static int _guestNumber = 0;
 
     public static void Main (string[] args)
@@ -31,9 +32,18 @@ class TCPServerSample
 
 		while (true)
 		{
-            ProcessNewClients(listener);
-            ProcessExistingClients();
-            CleanupFaultyClients();
+            try
+            {
+                ProcessNewClients(listener);
+                ProcessExistingClients();
+            }
+            catch  { }
+            try
+            {
+                CleanupFaultyClients();
+
+            }
+            catch { }
 
             //Although technically not required, now that we are no longer blocking, 
             //it is good to cut your CPU some slack
@@ -46,10 +56,13 @@ class TCPServerSample
         while (listener.Pending())
         {
             TcpClient client = listener.AcceptTcpClient();
-            ClientInfos clientInfo = new ClientInfos();
-            clientInfo.Client = client;
-            clientInfo.Nickname = $"Guest{_guestNumber++}";
-            _clients.Add(clientInfo);
+            string clientKey = client.Client.RemoteEndPoint.ToString();
+
+            ClientInfos clientInfo = new ClientInfos{
+                Client = client,
+                Nickname = $"guest{_guestNumber++}"
+            };
+            _clients.Add(clientKey, clientInfo);
 
             SendToClient(clientInfo, $"You joined as {clientInfo.Nickname}!");
             Broadcast($"{clientInfo.Nickname} joined the chat", exclude: clientInfo);
@@ -57,50 +70,93 @@ class TCPServerSample
     }
     private static void ProcessExistingClients()
     {
-        List<ClientInfos> faultyClients = new List<ClientInfos>();
+        List<string> faultyClientKeys = new List<string>();
 
-
-        foreach (ClientInfos client in _clients)
+        foreach (var keyVal in _clients.ToList())
         {
-            NetworkStream stream = client.Stream;
+            ClientInfos clientInfo = keyVal.Value;
+            NetworkStream stream = clientInfo.Stream;
             if (stream.DataAvailable)
             {
                 try
                 {
                     byte[] inBytes = StreamUtil.Read(stream);
                     string inString = Encoding.UTF8.GetString(inBytes);
-                    string formatted = $"[{DateTime.Now:HH:mm:ss} - {client.Client.Client.RemoteEndPoint}] {client.Nickname}: {strrev(inString)}";
 
+                    SendToClient(clientInfo, ">> " + inString);
 
-                    Broadcast(formatted);
+                    if (inString.StartsWith("/setname ") || inString.StartsWith("/sn "))
+                    {
+                        HandleSetNameCommand(clientInfo, inString);
+                    }
+                    else if (inString.Equals("/list"))
+                    {
+                        HandleListCommand(clientInfo);
+                    }
+                    else if (inString.Equals("/help"))
+                    {
+                        HandleHelpCommand(clientInfo);
+                    }
+                    else if (inString.StartsWith("/whisper ") || inString.StartsWith("/w "))
+                    {
+                        HandleWhisperCommand(clientInfo, inString);
+                    }
+
+                    //room related commands
+                    else if (inString.StartsWith("/join "))
+                    {
+                        HandleJoinRoomCommand(clientInfo, inString);
+                    }
+                    else if (inString.Equals("/listrooms"))
+                    {
+                        HandleListRoomsCommand(clientInfo);
+                    }
+                    else if (inString.Equals("/listroom"))
+                    {
+                        HandleListRoomCommand(clientInfo);
+                    }
+                    else
+                    {
+                        string formatted = $"[{DateTime.Now:HH:mm:ss}] {clientInfo.Nickname}: {inString}";
+                        // add  {clientInfo.Client.Client.RemoteEndPo int} for port
+                        Broadcast(formatted, clientInfo.CurrentRoom, exclude: clientInfo);
+                        //Broadcast(formatted, clientInfo.CurrentRoom);
+                    }
+
+                    //string formatted = $"[{DateTime.Now:HH:mm:ss} - {client.Client.Client.RemoteEndPoint}] {client.Nickname}: {strrev(inString)}";
+                    //Broadcast(formatted);
                 }
                 catch(Exception e)
                 {
                     Console.WriteLine($"Error > {e.Message}");
-                    faultyClients.Add(client);
+                    faultyClientKeys.Add(keyVal.Key);
                 }
             }
+        }
+        foreach (string key in faultyClientKeys)
+        {
+            _clients[key].Client.Close();
+            _clients.Remove(key);
         }
     }
 
     private static void CleanupFaultyClients()
     {
-        List<ClientInfos> faultyClients = new List<ClientInfos>();
-        foreach (ClientInfos client in _clients)
+        List<string> faultyClientKeys = new List<string>();
+        foreach (var keyVal in _clients)
         {
-            if (!IsClientConnected(client.Client))
+            if (!IsClientConnected(keyVal.Value.Client))
             {
-                faultyClients.Add(client);
-                Broadcast($"{client.Nickname} left the chat");
+                faultyClientKeys.Add(keyVal.Key);
+                Broadcast($"{keyVal.Value.Nickname} left the chat");
             }
         }
 
-        foreach (ClientInfos client in faultyClients)
+        foreach (string key in faultyClientKeys)
         {
-            client.Client.Close();
+            _clients[key].Client.Close();
+            _clients.Remove(key);
         }
-
-        _clients.RemoveAll(c => faultyClients.Contains(c));
     }
 
     private static bool IsClientConnected(TcpClient client)
@@ -123,12 +179,12 @@ class TCPServerSample
         }
     }
 
-    private static void Broadcast(string message, ClientInfos exclude = null)
+    private static void Broadcast(string message, string room = null, ClientInfos exclude = null)
     {
         byte[] outBytes = Encoding.UTF8.GetBytes(message);
-        foreach (ClientInfos client in _clients)
+        foreach (ClientInfos client in _clients.Values)
         {
-            if (client != exclude)
+            if (client != exclude && (room == null || client.CurrentRoom == room))
             {
                 try
                 {
@@ -136,7 +192,7 @@ class TCPServerSample
                 }
                 catch
                 {
-                    
+                    //disconnect code
                 }
             }
         }
@@ -162,6 +218,101 @@ class TCPServerSample
         char[] arr = str.ToCharArray();
         Array.Reverse(arr);
         return new string(arr);
+    }
+
+    //Change name func
+    private static void HandleSetNameCommand(ClientInfos client, string command)
+    {
+        string newNick = command.Split(new[] { ' ' }, 2)[1].Trim().ToLower();   //remove command string & sanitize
+
+        //name validation
+        if (string.IsNullOrEmpty(newNick))
+        {
+            SendToClient(client, "Nickname cannot be empty.");
+            return;
+        }
+        if (_clients.Values.Any(c => c.Nickname.ToLower() == newNick))
+        {
+            SendToClient(client, "Nickname already taken.");
+        }
+        else
+        {   //change name
+            string oldNick = client.Nickname;
+            client.Nickname = newNick;
+            Broadcast($"{oldNick} changed name to {newNick}", client.CurrentRoom);
+            SendToClient(client, $"Your nickname is now {newNick}.");
+        }
+    }
+
+    //list other clients func
+    private static void HandleListCommand(ClientInfos client)
+    {
+        string names = "Connected users: " + string.Join(", ", _clients.Values.Select(c => c.Nickname));
+        SendToClient(client, names);
+    }
+
+    //show commands list func
+    private static void HandleHelpCommand(ClientInfos client)
+    {
+        string help = "Commands:\n" +
+            "/setname [name] or /sn [name] - Change nickname\n" +
+            "/list - List users\n" +
+            "/whisper [nickname] [message] or /w [nickname] [message] - Whisper to user\n" +
+            "/join [room] - Join / Create room\n" +
+            "/listrooms - List available rooms\n" +
+            "/listroom - List room members\n" +
+            "/help - Show help";
+        SendToClient(client, help);
+    }
+
+    //whisper func
+    private static void HandleWhisperCommand(ClientInfos sender, string command)
+    {
+        string[] parts = command.Split(new[] { ' ' }, 3); //get target & msg content
+        if (parts.Length < 3)
+        {
+            SendToClient(sender, "Invalid format, Follow this structure: /whisper [nickname] [message]");
+            return;
+        }
+
+        string targetNick = parts[1].ToLower();
+        string message = parts[2];
+        ClientInfos target = _clients.Values.FirstOrDefault(c => c.Nickname.ToLower() == targetNick);
+
+        if (target == null)
+        {
+            SendToClient(sender, $"User {targetNick} not found.");
+        }
+        else
+        {
+            SendToClient(target, $"[Whisper] from {sender.Nickname}: {message}");
+            SendToClient(sender, $"[You whispered to {target.Nickname}]: {message}");
+        }
+    }
+
+
+    //room management funcs
+    private static void HandleJoinRoomCommand(ClientInfos client, string command)
+    {
+        string roomName = command.Substring(6).Trim(); //remove "/join " & sanitize
+        if (string.IsNullOrEmpty(roomName)) roomName = "general";
+
+        string oldRoom = client.CurrentRoom;
+        client.CurrentRoom = roomName;
+        Broadcast($"{client.Nickname} joined room {roomName}", roomName);
+        SendToClient(client, $"You joined room {roomName}.");
+    }
+
+    private static void HandleListRoomsCommand(ClientInfos client)
+    {
+        var rooms = _clients.Values.Select(c => c.CurrentRoom).Distinct();
+        SendToClient(client, "Rooms: " + string.Join(", ", rooms));
+    }
+
+    private static void HandleListRoomCommand(ClientInfos client)
+    {
+        var members = _clients.Values.Where(c => c.CurrentRoom == client.CurrentRoom).Select(c => c.Nickname);
+        SendToClient(client, $"Room members: {string.Join(", ", members)}");
     }
 
 }
